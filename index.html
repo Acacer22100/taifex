@@ -7,7 +7,6 @@
 <title>台指選擇權機率盤</title>
 </head>
 <body>
-
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -100,6 +99,10 @@ details p{margin:.5em 0;max-width:68ch}
 .chip.hot{border-color:var(--up);color:var(--up)} .chip.cool{border-color:var(--down);color:var(--down)}
 .meter{height:6px;border-radius:3px;background:var(--line);position:relative;margin-top:6px}
 .meter i{position:absolute;top:-3px;width:4px;height:12px;border-radius:2px;background:var(--accent)}
+.risk{margin-top:12px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);font-size:.88rem;line-height:1.55}
+.risk.low{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,transparent)}
+.risk strong{display:block;margin-bottom:2px}
+.risk.low strong{color:var(--warn)}
 .model-note{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:.85rem;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -126,7 +129,8 @@ details p{margin:.5em 0;max-width:68ch}
       <p class="note" style="margin:4px 0 0">以上是期貨價量的描述統計，不是預測。走勢圖為連續月（換月調整後），夜盤：<span id="fNight">—</span></p>
     </div>
     <div class="model-note" id="scoreBlock" hidden></div>
-    <div class="model-note" id="modelNote">價量模型：尚未建立。模型分布須先用 2013 年以後的到期結算價回測、確認比市場隱含機率更準，才會疊加在下方的分布圖上。</div>
+    <div class="risk" id="riskBlock" hidden></div>
+    <div class="model-note" id="modelNote">價量模型：已用 2013–2026 共 658 週回測。以 20 日位置、5 日漲跌調整市場分布寬度，逐年樣本外改善不到 0.2%、不顯著，所以不疊加；下方分布仍是市場隱含分布，價量只保留為低位警示。</div>
   </section>
 
   <section class="panel source" aria-label="資料來源">
@@ -736,7 +740,7 @@ if (typeof module !== "undefined") module.exports = Engine;
     const first = rep.contracts.find(c => c.tdays >= 2) || rep.contracts[0];
     sel.value = first.contract;
     state.contract = first.contract; $("tdays").value = first.tdays;
-    compute(); renderFutures(rep.futures); renderScore(rep); showLoaded();
+    compute(); renderFutures(rep.futures); renderRisk(rep); renderScore(rep); showLoaded();
     setRepStatus(`已載入 ${rep.date} 的報告（${source}）`, "ok");
     try { localStorage.setItem("lastReport", JSON.stringify(rep)); } catch {}
   }
@@ -753,6 +757,13 @@ if (typeof module !== "undefined") module.exports = Engine;
       落在當時分布的第 <span class="num">${p}</span> 百分位${band}<br>
       累計 ${sc.n} 次：落在 50% 區間 <span class="num">${Math.round(sc.in50_rate * 100)}%</span>（應約 50%）、80% 區間 <span class="num">${Math.round(sc.in80_rate * 100)}%</span>（應約 80%）${sc.n < 20 ? "。樣本還少，至少累積 20 次再看比例。" : "。"}`;
   }
+  function renderRisk(rep) {
+    const box = $("riskBlock"), rf = rep.risk_flag;
+    box.hidden = !rf; if (!rf) return;
+    box.className = "risk" + (rf.level === "low" ? " low" : "");
+    box.innerHTML = `<strong>${rf.level === "low" ? "⚠ " : ""}${rf.title}（20 日位置 ${Math.round(rf.pos20 * 100)}%）</strong>${rf.text}<br><span style="color:var(--muted)">研究用途，不構成投資建議。</span>`;
+    if (rep.model && rep.model.note) $("modelNote").textContent = "價量模型：" + rep.model.note;
+  }
   function renderFutures(f) {
     $("futBlock").hidden = !f;
     if (!f) return;
@@ -763,8 +774,7 @@ if (typeof module !== "undefined") module.exports = Engine;
     $("fRet").innerHTML = `1日 <span class="${cls(f.ret_1d)}">${pctS(f.ret_1d)}</span>・5日 <span class="${cls(f.ret_5d)}">${pctS(f.ret_5d)}</span>・20日 <span class="${cls(f.ret_20d)}">${pctS(f.ret_20d)}</span>`;
     $("fRv").textContent = pct(f.rv20);
     const r = f.iv_vs_rv20;
-    const chip = r == null ? "" : r > 1.2 ? '<span class="chip hot">選擇權偏貴</span>' : r < 0.9 ? '<span class="chip cool">選擇權偏便宜</span>' : '<span class="chip">接近</span>';
-    $("fIvRv").innerHTML = r == null ? `60日 ${pct(f.rv60)}` : `週選 IV ÷ 實際波動 = ${r.toFixed(2)}${chip}`;
+    $("fIvRv").innerHTML = r == null ? `60日 ${pct(f.rv60)}` : `週選 IV ÷ 實際波動 = ${r.toFixed(2)}<span class="chip" title="658 週回測：這個比值對下週實際波動沒有預測力">僅供參考</span>`;
     $("fPos").textContent = `${f.pos20 == null ? "—" : Math.round(f.pos20 * 100) + "%"}／${f.pos60 == null ? "—" : Math.round(f.pos60 * 100) + "%"}`;
     $("fPosMk").style.left = `calc(${Math.round((f.pos20 ?? 0.5) * 100)}% - 2px)`;
     $("fVol").textContent = f.volume_vs_20d == null ? "—" : `${f.volume_vs_20d.toFixed(2)} 倍均量`;
