@@ -577,11 +577,18 @@ def trade_plan(rep: dict, cont: pd.DataFrame | None) -> dict | None:
         return None
     near = lambda arr, x: float(arr[np.argmin(np.abs(arr - x))])
     atm = near(ks_all, ref)
-    ks = near(ks_all, atm + PLAN["short_off"])
-    lower = ks_all[ks_all < ks]
-    if not len(lower):
-        return None
-    kl = near(lower, ks - PLAN["width"])            # 固定差 400 點，不論履約價每檔 50 或 100
+    # 兩腳固定差 400 點（不論履約價每檔 50 或 100）：從最接近「價平+200」的賣出腳開始找，
+    # 找到第一個「賣出腳−400」也有報價的組合；真的找不到才退而求其次用最接近的。
+    have = set(ks_all.tolist())
+    cands = sorted(ks_all, key=lambda k: (abs(k - (atm + PLAN["short_off"])), -k))
+    pick = next(((float(k), float(k) - PLAN["width"]) for k in cands[:6] if (float(k) - PLAN["width"]) in have), None)
+    if pick is None:
+        ks = near(ks_all, atm + PLAN["short_off"])
+        lower = ks_all[ks_all < ks]
+        if not len(lower):
+            return None
+        pick = (ks, near(lower, ks - PLAN["width"]))
+    ks, kl = pick
     ps, pl = puts[ks], puts[kl]
     credit = ps - pl; width = ks - kl
     pass_r1 = r1 <= thr["r1"]; pass_rv = rv20 > thr["rv20"]
