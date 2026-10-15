@@ -99,6 +99,16 @@ details p{margin:.5em 0;max-width:68ch}
 .chip.hot{border-color:var(--up);color:var(--up)} .chip.cool{border-color:var(--down);color:var(--down)}
 .meter{height:6px;border-radius:3px;background:var(--line);position:relative;margin-top:6px}
 .meter i{position:absolute;top:-3px;width:4px;height:12px;border-radius:2px;background:var(--accent)}
+.plan{margin-top:12px;padding:12px 14px;border-radius:8px;border:1px solid var(--line);font-size:.9rem;line-height:1.6}
+.plan.go{border-color:var(--down);background:color-mix(in srgb,var(--down) 8%,transparent)}
+.plan.skip{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 8%,transparent)}
+.plan h3{margin:0 0 6px;font-size:1rem}
+.plan .conds{display:flex;flex-wrap:wrap;gap:4px 16px;font-family:var(--f-num);font-size:.85rem;margin-bottom:8px}
+.plan .ok{color:var(--down)} .plan .ng{color:var(--up)}
+.plan .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:8px 0}
+@media (max-width:760px){.plan .grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.plan .grid .v{font-family:var(--f-num);font-size:1.15rem;font-weight:600}
+.plan .grid .k{font-size:.78rem;color:var(--muted)}
 .risk{margin-top:12px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);font-size:.88rem;line-height:1.55}
 .risk.low{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,transparent)}
 .risk strong{display:block;margin-bottom:2px}
@@ -129,6 +139,7 @@ details p{margin:.5em 0;max-width:68ch}
       <p class="note" style="margin:4px 0 0">以上是期貨價量的描述統計，不是預測。走勢圖為連續月（換月調整後），夜盤：<span id="fNight">—</span></p>
     </div>
     <div class="model-note" id="scoreBlock" hidden></div>
+    <div class="plan" id="planBlock" hidden></div>
     <div class="risk" id="riskBlock" hidden></div>
     <div class="model-note" id="modelNote">價量模型：已用 2013–2026 共 658 週回測。以 20 日位置、5 日漲跌調整市場分布寬度，逐年樣本外改善不到 0.2%、不顯著，所以不疊加；下方分布仍是市場隱含分布，價量只保留為低位警示。</div>
   </section>
@@ -740,7 +751,7 @@ if (typeof module !== "undefined") module.exports = Engine;
     const first = rep.contracts.find(c => c.tdays >= 2) || rep.contracts[0];
     sel.value = first.contract;
     state.contract = first.contract; $("tdays").value = first.tdays;
-    compute(); renderFutures(rep.futures); renderRisk(rep); renderScore(rep); showLoaded();
+    compute(); renderFutures(rep.futures); renderPlan(rep); renderRisk(rep); renderScore(rep); showLoaded();
     setRepStatus(`已載入 ${rep.date} 的報告（${source}）`, "ok");
     try { localStorage.setItem("lastReport", JSON.stringify(rep)); } catch {}
   }
@@ -756,6 +767,29 @@ if (typeof module !== "undefined") module.exports = Engine;
       ${L.report_date} 報告（剩 ${L.tdays} 交易日）的平價遠期是 <span class="num">${fmt(L.F)}</span>，誤差 <span class="num ${L.err_pts >= 0 ? "up" : "down"}">${signed(L.err_pts)}</span> 點（${L.err_sigma >= 0 ? "+" : "−"}${Math.abs(L.err_sigma).toFixed(2)}σ），
       落在當時分布的第 <span class="num">${p}</span> 百分位${band}<br>
       累計 ${sc.n} 次：落在 50% 區間 <span class="num">${Math.round(sc.in50_rate * 100)}%</span>（應約 50%）、80% 區間 <span class="num">${Math.round(sc.in80_rate * 100)}%</span>（應約 80%）${sc.n < 20 ? "。樣本還少，至少累積 20 次再看比例。" : "。"}`;
+  }
+  function renderPlan(rep) {
+    const box = $("planBlock"), p = rep.plan;
+    box.hidden = !p; if (!p) return;
+    const r = p.rule, pctS = v => (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(2) + "%";
+    const head = { go: "系統判定：可進場", skip: "系統判定：本週不進場", not_wed: "今天不是週三，系統只在週三收盤判定（以下僅供參考）" }[p.status];
+    box.className = "plan" + (p.status === "go" ? " go" : p.status === "skip" ? " skip" : "");
+    const dayLbl = p.is_wed ? "週三漲跌" : "當日漲跌";
+    const tr = rep.plan_track;
+    const track = tr ? `<div class="note">追蹤（${tr.pending} 筆未到期）：符合規則 ${tr.n_go} 次，合計 <span class="num ${tr.go_ntd >= 0 ? "up" : "down"}">${signed(tr.go_ntd)}</span> 元；跳過 ${tr.n_skip} 次（假設有做 <span class="num">${signed(tr.skip_ntd)}</span> 元）。</div>` : "";
+    const enough = p.credit >= p.min_credit;
+    box.innerHTML = `<h3>週選賣權多頭價差　${head}</h3>
+      <div class="conds"><span class="${r.pass_r1 ? "ok" : "ng"}">${r.pass_r1 ? "✓" : "✗"} ${dayLbl} ${pctS(r.r1)}（上限 ${pctS(r.r1_max)}）</span>
+        <span class="${r.pass_rv ? "ok" : "ng"}">${r.pass_rv ? "✓" : "✗"} 20 日波動 ${(r.rv20 * 100).toFixed(1)}%（下限 ${(r.rv20_min * 100).toFixed(1)}%）</span>
+        ${r.ma200 == null ? "" : `<span class="${r.pass_ma ? "ok" : "ng"}">${r.pass_ma ? "✓" : "✗"} 站上 200 日線（收 ${fmt(r.close)}／均線 ${fmt(r.ma200)}，連續月調整後）</span>`}</div>
+      <div>${p.contract}（${p.expiry.slice(4, 6)}/${p.expiry.slice(6)} 到期，剩 ${p.tdays} 交易日）　價平 <span class="num">${fmt(p.atm)}</span>（依${p.ref_src || "平價遠期"} <span class="num">${fmt(p.ref ?? p.F)}</span>）</div>
+      <div class="grid">
+        <div><div class="k">賣出 Put（價平 +200，價內）</div><div class="v">${fmt(p.short)}</div><div class="k">結算價 ${p.short_px}</div></div>
+        <div><div class="k">買進 Put（賣出腳 −400，價外）</div><div class="v">${fmt(p.long)}</div><div class="k">結算價 ${p.long_px}</div></div>
+        <div><div class="k">建議價差（權利金）至少</div><div class="v">${p.min_credit} 點</div><div class="k">結算價算出 ${p.credit} 點${enough ? "" : "，低於建議"}</div></div>
+        <div><div class="k">最多賺／最多賠（1 組）</div><div class="v">${fmt(p.max_profit_ntd)}／${fmt(p.max_loss_ntd)}</div><div class="k">到期損益兩平 ${fmt(p.breakeven_index)}</div></div>
+      </div>
+      <div class="note">權利金門檻：回測中這組價差平均收到寬度的 45%（${p.typical_credit} 點），扣成本後約 ${p.breakeven_credit} 點（36%）打平，所以建議至少 40%（${p.min_credit} 點）才進場。三項條件都打勾才判定可進場；200 日線是防大空頭的保險。規則與價格都以週三收盤為準；週四以後進場優勢約剩一半，且未用選擇權價格驗證。研究用途，不構成投資建議。</div>${track}`;
   }
   function renderRisk(rep) {
     const box = $("riskBlock"), rf = rep.risk_flag;
