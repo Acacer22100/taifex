@@ -1,0 +1,52 @@
+name: 每日盤後報告
+
+on:
+  schedule:
+    - cron: "40 7 * * 1-5"    # 台北 15:40（GitHub 用 UTC；實際可能延遲 10～30 分鐘）
+    - cron: "40 9 * * 1-5"    # 台北 17:40 再跑一次，補期交所資料延遲
+  workflow_dispatch:           # 也可以在 Actions 頁面手動按「Run workflow」
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安裝套件
+        run: pip install pandas numpy scipy requests lxml html5lib
+
+      - name: 還原資料快取
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: taifex-data-${{ github.run_id }}
+          restore-keys: taifex-data-
+
+      - name: 產生報告
+        env:
+          TZ: Asia/Taipei
+        run: python pipeline/run_daily.py
+
+      - name: 提交報告
+        run: |
+          git config user.name "taifex-bot"
+          git config user.email "taifex-bot@users.noreply.github.com"
+          for f in report_latest.json reports plan_log.csv settle_log.csv final_settle.csv; do
+            [ -e "$f" ] && git add "$f"
+          done
+          git diff --cached --quiet && { echo "沒有變更"; exit 0; }
+          git commit -m "report $(TZ=Asia/Taipei date +%F)"
+          git pull --rebase
+          git push
